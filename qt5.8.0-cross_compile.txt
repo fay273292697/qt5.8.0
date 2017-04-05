@@ -1,0 +1,191 @@
+主机环境：VMware_workstation_full_12.5.2+ubuntu-16.04.1-desktop-i386.iso
+1.下载qt5.8源码qt-everywhere-opensource-src-5.8.0.tar.gz 
+
+2.下载ARM交叉编译工具arm-2014.05-29-arm-none-Linux-gnueabi-i686-pc-linux-gnu.tar.bz2 
+http://www.veryarm.com/arm-none-linux-gnueabi-gcc
+
+3.下载tslib1.4 
+http://vdisk.weibo.com/s/AcUHxOERV2k0?sudaref=www.baidu.com
+
+第一步：安装arm-2014交叉编译器
+1.解压：tar -xvf arm-2014.05-29-arm-none-Linux-gnueabi-i686-pc-linux-gnu.tar.bz2  -C /opt/arm-2014
+2.修改环境变量：vim /etc/profile，添加：export PATH=$PATH:/opt/arm-2014/bin,source /etc/profile
+3.输入arm-none-然后按下tab出现编译器"arm-none-linux-gnueabi-gcc-4.8.2",表明安装成功。
+
+第二步：交叉编译tslib1.4.0
+1.解压源码并在tslib目录下新建build-ts文件，添加内容：
+#!/bin/bash
+
+source /etc/profile	
+
+SCRIPT_PATH=`cd "$(dirname "$0")" ; pwd`
+cd "$SCRIPT_PATH"
+
+#make clean && make distclean 
+
+./autogen.sh &&
+./configure --prefix=/opt/tslib-1.4.0 --host=arm-none-linux-gnueabi ac_cv_func_malloc_0_nonnull=yes &&
+#arm-none-linux-gnueabi是交叉编译器前缀
+make &&
+make install
+
+exit 0
+2.sudo apt-get install autoconf
+  sudo apt-get install automake
+  sudo apt-get install libtool
+
+3.修改修改源码目录下/tests/ts_calibrate.c 文件的226和229行，增加：“0777“
+	if ((calfile = getenv("TSLIB_CALIBFILE")) != NULL) {
+		cal_fd = open (calfile, O_CREAT | O_RDWR, 0777);
+	} else {
+		cal_fd = open ("/etc/pointercal", O_CREAT | O_RDWR, 0777);
+	}
+
+4.切换root用户：sudo -s；source /etc/profile 
+5. 新建脚本build-ts:
+#!/bin/bash
+
+source /etc/profile	
+
+SCRIPT_PATH=`cd "$(dirname "$0")" ; pwd`
+cd "$SCRIPT_PATH"
+
+#make clean && make distclean 
+
+./autogen.sh &&
+#arm-none-linux-gnueabi为编译器前缀
+./configure --prefix=/opt/tslib-1.4.0 --host=arm-none-linux-gnueabi ac_cv_func_malloc_0_nonnull=yes &&
+make &&
+make install
+
+exit 0
+6.执行脚本：./build-ts; /opt/tslib-1.4.0目录下生成4个目录：bin  etc  include  lib
+7.cd /opt/tslib-1.4.0/lib; file libts-0.0.so.0.1.1看是否是arm版本
+8.vim /opt/tslib-1.4.0/etc/ts.conf 将#module_raw input改为module_raw input，注意不要有空格
+
+
+第三步：编译QT5.8
+1.解压源码：tar -xvf qt-everywhere-opensource-src-5.8.0.tar.gz 
+2.修改文件：vim /qtbase/mkspecs/linux-arm-gnueabi-g++/qmake.conf
+MAKEFILE_GENERATOR      = UNIX
+CONFIG                 += incremental
+QMAKE_INCREMENTAL_STYLE = sublib
+
+include(../common/linux.conf)
+include(../common/gcc-base-unix.conf)
+include(../common/g++-unix.conf)
+
+QT_QPA_DEFAULT_PLATFORM = linuxfb #eglfs
+QMAKE_CFLAGS_RELEASE += -O2 -march=armv7-a
+QMAKE_CXXFLAGS_RELEASE += -O2 -march=armv7-a
+
+QMAKE_INCDIR += /opt/tslib-1.4.0/include  
+QMAKE_LIBDIR += /opt/tslib-1.4.0/lib 
+
+# modifications to g++.conf
+QMAKE_CC                = arm-none-linux-gnueabi-gcc -lts
+QMAKE_CXX               = arm-none-linux-gnueabi-g++ -lts
+QMAKE_LINK              = arm-none-linux-gnueabi-g++ -lts
+QMAKE_LINK_SHLIB        = arm-none-linux-gnueabi-g++ -lts
+
+# modifications to linux.conf
+QMAKE_AR                = arm-none-linux-gnueabi-ar cqs
+QMAKE_OBJCOPY           = arm-none-linux-gnueabi-objcopy
+QMAKE_NM                = arm-none-linux-gnueabi-nm -P
+QMAKE_STRIP             = arm-none-linux-gnueabi-strip
+load(qt_config)
+3.源码目录新建脚本build-qt，内容如下：
+#!/bin/sh
+./configure \
+-v \
+-prefix /opt/qt-5.8.0-arm \
+-confirm-license \
+-release \
+-opensource \
+-shared \
+-xplatform linux-arm-gnueabi-g++ \
+-optimized-qmake \
+-pch \
+-qt-sqlite \
+-qt-libjpeg \
+-qt-libpng \
+-qt-freetype \
+-qt-zlib \
+-make libs \
+-tslib \
+-no-opengl \
+-skip qt3d \
+-skip qtcanvas3d \
+-skip qtpurchasing \
+-no-sse2 \
+-no-openssl \
+-no-cups \
+-no-glib \
+-no-iconv \
+-nomake tests \
+-nomake tools \
+-skip qtvirtualkeyboard \
+-I /opt/tslib-1.4.0/include \
+-L /opt/tslib-1.4.0/lib
+4.切换root：sudo -s,source /etc/profile
+5.make && make install
+
+第四步：部署到arm板子中：
+1.拷贝tslib命令：
+scp fay@10.50.3.25:/opt/tslib-1.4.0/bin/* /usr/bin
+拷贝tslib插件库：
+scp fay@10.50.3.25:/opt/tslib-1.4.0/lib/ts/* /usr/lib/ts/
+拷贝tslib库文件并建立软链接：
+scp fay@10.50.3.25:/opt/tslib-1.4.0/lib/libts-0.0.so.0.1.1 /usr/lib
+scp fay@10.50.3.25:/opt/tslib-1.4.0/lib/libts.la /usr/lib
+ln -s /usr/lib/libts-0.0.so.0.1.1 /usr/lib/libts-0.0.so.0
+ln -s /usr/lib/libts-0.0.so.0.1.1 /usr/lib/libts.so
+拷贝tslib配置文件：
+scp fay@10.50.3.25:/opt/tslib-1.4.0/etc/ts.config/* /etc/
+
+2.拷贝qt5.8库文件和插件库：
+打包库：cd /opt/qt-5.8.0-arm/lib tar -zcf lib.tgz ./*
+
+scp fay@10.50.3.25:/opt/qt-5.8.0-arm/lib/lib.tgz /yctek/qt/lib
+scp -r fay@10.50.3.25:/opt/qt-5.8.0-arm/plugins/* /yctek/qt/plugins(包含文件夹)
+scp -r fay@10.50.3.25:/opt/qt-5.8.0-arm/qml/* /yctek/qt/qml
+
+3.设置/etc/profile文件环境变量:
+export QWS_MOUSE_PROTO="/dev/input/event0"
+export QML2_IMPORT_PATH="/yctek/qt/qml"
+export QT_QPA_PLATFORM_PLUGIN_PATH="/yctek/qt/plugins" 
+export QT_QPA_PLATFORM="linuxfb:fb=/dev/fb0" 
+export QT_QPA_FONTDIR="/yctek/qt/lib/fonts"
+export QT_QPA_GENERIC_PLUGINS="tslib:/dev/input/event0"
+export QT_QPA_FB_TSLIB=1（否则QT接收不到触摸事件）
+#export LD_PRELOAD=/usr/lib/libts.so
+#export QT_QPA_EGLFS_FB=/dev/fb0
+
+第五步：下载qtcreator（根据不同的机器下载对应的版本x86或者x64）
+http://download.qt.io/official_releases/qtcreator/3.5/3.5.0/
+下载qt-creator-opensource-linux-x86-3.5.0.run，然后安装，配置即可。
+
+//拷贝demo到arm板子运行：
+//scp fay@10.50.3.25:/home/fay/qt_project/build-demo-arm-Release/demo /root/
+
+
+常见的错误：
+1.qmake: could not exec ‘/usr/lib/x86_64-linux-gnu/qt4/bin/qmake’: No such file or directory
+分析： qtchooser默认选择路径中没有指向qmake路径
+解决方法：sudo vim /usr/lib/i386-linux-gnu/qt-default/qtchooser/default.conf
+将第一行中的/usr/lib/x86_64-linux-gnu/qt4/bin/qmake 替代为qmake的路径（qt安装路径 /opt/qt-5.8.0-arm/bin）
+2.Couldnt load module pthres
+ts_config() failed (No such file or directory
+解决方法：在pro工程中加上：LIBS += -L/opt/tslib-1.4.0/lib -lts
+
+3.QQmlApplicationEngine failed to load component
+qrc:///main.qml:1 module "QtQuick" is not installed
+qrc:///main.qml:2 module "QtQuick.Controls" is not installed
+qrc:///main.qml:1 module "QtQuick" is not installed
+qrc:///main.qml:2 module "QtQuick.Controls" is not installed
+解决方法：没有指明qml的路径，在环境里添加：export QML2_IMPORT_PATH=$QTDIR/qml
+
+4.Ubuntu16.04软件中心闪退：
+sudo apt-get update
+sudo apt-get dist-upgrade
+sudo apt-get install --reinstall software-center
